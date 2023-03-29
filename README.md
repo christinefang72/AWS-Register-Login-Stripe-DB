@@ -196,6 +196,9 @@ function App () {
 
 ## Helpful Resources
 [1] https://www.youtube.com/watch?v=Sk9HMuAaTmQ
+
 [2] https://welearncode.com/stripe-amplify/
+
 [3] https://aws.amazon.com/getting-started/hands-on/build-react-app-amplify-graphql/module-three/
+
 [4] https://dzone.com/articles/from-aws-cognito-to-dynamobd-using-triggers
