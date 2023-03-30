@@ -1,26 +1,13 @@
 # AWS Serverless: Subscription (Stripe) - Register - DynamoDB - Login
 ## Summary
-This project builds a subscription website with AWS and Stripe. It allows users to register, verify email addresses, login, and reset password by using AWS Cognito. A webpage with 3 tiers of subscription plans and 3 corresponding buttons will be presented to the user. The 3 subscription plans are linked to 3 previously configured products on Stripe. By clicking on one of the buttons, the user will be directed to Stripe to finish payment. An AWS Lambda function listens to the events from Stripe via webhook. Once the payment finishes, Lambda will be notified to trigger Cognito to create a user account. A second Lambda is linked to Cognito for post confirmation trigger. Once the user finishes email verfication, the second Lambda writes the user information to DynamoDB database.
+This project builds a subscription website with AWS and Stripe. It allows users to register, verify email addresses, login, and reset password by using AWS Cognito. A webpage with 3 tiers of subscription plans and 3 corresponding buttons will be presented to the user. The 3 subscription plans are linked to 3 previously configured products on Stripe. By clicking on one of the buttons, the user will be directed to Stripe to finish the payment. An AWS Lambda function listens to the events from Stripe via webhook. Once the payment finishes, Lambda will be notified to trigger Cognito to create a user account. A second Lambda is linked to Cognito for post confirmation trigger. Once the user finishes email verfication, the second Lambda writes the user information to our database. You can either write directly into DynamoDB or use the managed GraphQL service provided by AppSync.
 ## DynamoDB Table Layout
-The following graphs show the recommended schema for a single user table in DynamoDB. The schema can be created and edited via AWS CLI -> `add API` -> `GraphQL`.
+The following graphs show the recommended schema for a single user table in DynamoDB.
 
 
 ![DB ER](https://user-images.githubusercontent.com/91907021/228631754-9b775b4c-ed92-4a73-ad21-8abf815b92a6.png)
 ![DB key-value pairs](https://user-images.githubusercontent.com/91907021/228632415-5fb531cd-634c-43c5-999c-9ccaa6e98ec0.jpg)
 
-
-A template for the schema:
-```
-type User @model
-  @auth(rules: [
-    { allow: groups, groups: ["Admin"] },
-    { allow: owner, ownerField: "username", operations: [read] }
-  ]) {
-  id: ID!
-  username: String!
-  email: String! 
-}
-```
 
 ## Link Stripe to Your App
 - Create your React App and cd into the App folder
@@ -129,10 +116,13 @@ function App({ signOut }) {
 - Append the url string in the post function to the `endpoint` url. For example, `https.../webhook`
 - In Stripe Dashboard, go to `Developers` -> `Webhooks` -> `+ Add Endpoint`, choose `payment_intent.succeeded` as the event to listen for, paste the entire url in last step
 
-## Write User Data Into DynamoDB
+## Write User Data Into Database
+- There are two options to write user data into the database. The first several steps are the same for both options.
 - Add another Lambda function to the Amplify backend. It will serve as a trigger to write into DynamoDB after a user verifies his/her email during Cognito authentication.
 - In Cognito (CLI or UI), link the Lambda function, and choose `PostConfirmationTrigger`.
-- In `src/` -> `custom.js`, write an event handler function. It will take an incoming event from Cognito, parse the user info in the event, and write the parsed info into DynamoDB. 
+- In `src/custom.js`, write an event handler function. It will take an incoming event from Cognito, parse the user info in the event, and write the parsed info into DynamoDB. 
+### Write Directly Into DynamoDB
+The first option is to create an DynamoDB instance and directly put data into DynamoDB.
 - `Item` corresponds to one entry in the database and each item has attributes corresponding to the attributes in your GraphQL schema.
 - Following is an example code template:
 ```
@@ -170,6 +160,74 @@ exports.handler = async (event, context) => {
     }
 };
 ```
+### Recommended: Access the Database through GraphQL and AppSync
+The second option, which is more recommended, is to use a GraphQL API to access the database. The fundamental idea of a GraphQL API is that all API functionality is available via a unified query language (the Graph Query Language) under a single endpoint. Rather than making requests to various endpoints to get different parts of the data needed to build a webpage, developers can issue a single request to a GraphQL API and immediately get back all the data they need. 
+
+AppSnyc is a fully managed GraphQL service that simplifies the work of building a GraphQL API. It handles the parsing and resolution of requests and integrates well with other AWS services. You can flexibly add and manage more data sources like AWS Elastic Search to AppSync in the future.
+- Open AWS CLI in root directory of your App, type: `amplify add api`, then choose `GraphQL`
+- Edit the generated schema text file `schema.graphql` in the api folder of your amplify backend.
+- The following is a template schema:
+```
+type User @model
+  @auth(rules: [
+    { allow: groups, groups: ["Admin"] },
+    { allow: owner, ownerField: "username", operations: [read] }
+  ]) {
+  id: ID!
+  username: String!
+  email: String! 
+}
+```
+- Update the changes to the cloud, which will create an AppSync API, a DynamoDB table, and local GraphQL operations for a query
+```
+amplify push --y
+```
+- Add frontend code to perform user creation through the API. We will use the same code template in last section of direct writing into DynamoDB
+- First, import the packages for CRUD operation on User
+```
+import { listUsers } from "./graphql/queries";
+import {
+  createUser as createUserMutation,
+  deleteUser as deleteUserMutation,
+} from "./graphql/mutations";
+```
+- Change the format of data input
+- Change the try-catch block to creation operations through GraphQL
+- Here is a final code template
+```
+var aws = require('aws-sdk')
+
+exports.handler = async (event, context) => {
+    let date = new Date()
+    if (event.request.userAttributes.sub) {
+        const data = {
+                id: {S: event.request.userAttributes.sub},
+                username: {S: event.userName},
+                email: {S: event.request.userAttributes.email},
+                createdAt: {S: date.toISOString()},
+                updatedAt: {S: date.toISOString()},
+        }
+
+        try {
+            await API.graphql({
+              query: createNoteMutation,
+              variables: { input: data },
+            });
+            console.log("Success")
+        } catch (err) {
+            console.log("Error", err)
+        }
+
+        console.log("Success: Everything executed correctly")
+        context.done(null, event)
+
+    } else {
+        console.log("Error: Nothing was written to DynamoDB")
+        context.done(null, event)
+    }
+};
+```
+
 ## SignIn and Render Paywalled Content
 This is the last step. We have finished subscription and registration, now users can sign in and view subscription-exclusive contents.
 - In `SignIn.js` that you created before, use Cognito's signIn function and create a simple signin form with userName and password.
@@ -202,3 +260,5 @@ function App () {
 [3] https://aws.amazon.com/getting-started/hands-on/build-react-app-amplify-graphql/module-three/
 
 [4] https://dzone.com/articles/from-aws-cognito-to-dynamobd-using-triggers
+
+[5] https://www.serverless.com/guides/aws-appsync
